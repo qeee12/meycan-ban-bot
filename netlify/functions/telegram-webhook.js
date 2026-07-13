@@ -26,6 +26,16 @@ const BANNED_PATTERNS = [
   // добавляй сюда новые варианты по мере появления
 ];
 
+// ---------------------------------------------------------------------------
+// НАСТРОЙКА: слова, при появлении которых в ТЕКСТЕ СООБЩЕНИЯ пользователь
+// банится тихо (без объявлений от бота, просто бан + удаление сообщения).
+// Добавлено по просьбе Мейкана (бан слова "слив" и его форм).
+// ---------------------------------------------------------------------------
+const BANNED_WORD_PATTERNS = [
+  /слив\w*/i,
+  // добавляй сюда новые слова по мере появления
+];
+
 // Таблица похожих латинских букв -> кириллица (частый способ обхода фильтров)
 const HOMOGLYPHS = {
   a: "а", e: "е", o: "о", p: "р", c: "с",
@@ -48,6 +58,11 @@ function normalize(text) {
 function isBannedName(...parts) {
   const fullName = normalize(parts.filter(Boolean).join(" "));
   return BANNED_PATTERNS.some((pattern) => pattern.test(fullName));
+}
+
+function isBannedText(text) {
+  const normalized = normalize(text);
+  return BANNED_WORD_PATTERNS.some((pattern) => pattern.test(normalized));
 }
 
 async function telegramApi(method, params) {
@@ -103,11 +118,18 @@ exports.handler = async (event) => {
       }
     }
 
-    // Случай 2: обычное сообщение (на случай смены ника после вступления)
+    // Случай 2: обычное сообщение (на случай смены ника после вступления,
+    // а также проверка текста сообщения на запрещённые слова)
     if (update.message) {
       const message = update.message;
       const user = message.from;
-      if (user && isBannedName(user.first_name, user.last_name, user.username)) {
+      const text = message.text || message.caption || "";
+
+      const bannedByName =
+        user && isBannedName(user.first_name, user.last_name, user.username);
+      const bannedByText = isBannedText(text);
+
+      if (user && (bannedByName || bannedByText)) {
         await telegramApi("deleteMessage", {
           chat_id: message.chat.id,
           message_id: message.message_id,
@@ -115,7 +137,9 @@ exports.handler = async (event) => {
         await banUser(
           message.chat.id,
           user.id,
-          `ник в сообщении: ${user.first_name} ${user.last_name || ""} @${user.username || ""}`
+          bannedByText
+            ? `запрещённое слово в сообщении: "${text}"`
+            : `ник в сообщении: ${user.first_name} ${user.last_name || ""} @${user.username || ""}`
         );
       }
     }
